@@ -1,0 +1,1051 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
+<title>AI Safety Detection System — CCTV Monitor</title>
+<style>
+/* ═══════════════════════════════════════════
+   CCTV CONTROL ROOM AESTHETIC
+═══════════════════════════════════════════ */
+@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Oswald:wght@400;600;700&display=swap');
+
+:root {
+  --amber:   #f59e0b;
+  --red:     #ef4444;
+  --red-glow:#dc2626;
+  --green:   #22c55e;
+  --blue:    #38bdf8;
+  --panel:   #0a0c0f;
+  --surface: #0f1318;
+  --border:  #1e2530;
+  --muted:   #3a4455;
+  --text:    #c8d6e8;
+  --mono:    'Share Tech Mono', monospace;
+  --head:    'Oswald', sans-serif;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%; background: var(--panel);
+  color: var(--text); font-family: var(--mono);
+  overflow: hidden;
+}
+
+/* ── Grid overlay texture ── */
+body::before {
+  content: '';
+  position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background-image:
+    linear-gradient(rgba(56,189,248,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(56,189,248,0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* ── Top bar ── */
+#topbar {
+  position: relative; z-index: 10;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  height: 48px;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 18px;
+}
+.brand {
+  display: flex; align-items: center; gap: 14px;
+}
+.brand-badge {
+  background: var(--amber); color: #000;
+  font-family: var(--head); font-size: 13px; font-weight: 700;
+  padding: 3px 10px; letter-spacing: 2px;
+}
+.brand-title {
+  font-family: var(--head); font-weight: 700; font-size: 15px;
+  color: #fff; letter-spacing: 3px;
+}
+.brand-sub { font-size: 9px; color: var(--muted); letter-spacing: 1px; }
+#clock {
+  font-size: 18px; color: var(--amber); letter-spacing: 2px;
+  font-family: var(--mono);
+}
+.sys-status {
+  display: flex; align-items: center; gap: 16px; font-size: 10px; color: var(--muted);
+}
+.sys-pill {
+  display: flex; align-items: center; gap: 5px;
+  border: 1px solid var(--border); padding: 3px 8px;
+}
+.sys-pill.live { border-color: var(--red); color: var(--red); }
+.rec-dot {
+  width: 7px; height: 7px; border-radius: 50%; background: var(--red);
+  animation: blink 1s steps(1) infinite;
+}
+
+/* ── Main layout ── */
+#layout {
+  position: relative; z-index: 1;
+  display: flex; height: calc(100vh - 48px);
+}
+
+/* ── Left panel ── */
+#left-panel {
+  width: 220px; background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex; flex-direction: column;
+  padding: 14px 12px; gap: 12px;
+  overflow-y: auto; flex-shrink: 0;
+}
+.panel-section-title {
+  font-size: 9px; color: var(--muted); letter-spacing: 3px; text-transform: uppercase;
+  border-bottom: 1px solid var(--border); padding-bottom: 5px;
+}
+
+/* Camera tiles in sidebar */
+.cam-tile {
+  border: 1px solid var(--border); cursor: pointer;
+  transition: border-color 0.2s;
+  overflow: hidden;
+}
+.cam-tile:hover { border-color: var(--amber); }
+.cam-tile.active { border-color: var(--amber); }
+.cam-tile.running { border-color: var(--green); }
+.cam-tile.unsafe  { border-color: var(--red); animation: pulse-red 2s infinite; }
+.cam-tile-header {
+  background: #161c25; font-size: 10px; font-weight: 700;
+  padding: 4px 8px; display: flex; justify-content: space-between; align-items: center;
+}
+.cam-tile-header .cam-name { color: var(--amber); }
+.cam-tile-header .cam-status { font-size: 9px; }
+.cam-thumb {
+  height: 72px; background: #080a0d; position: relative; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+}
+.cam-thumb video, .cam-thumb canvas {
+  width: 100%; height: 100%; object-fit: cover;
+}
+.cam-thumb .offline-txt {
+  font-size: 10px; color: var(--muted); text-align: center; line-height: 1.5;
+}
+.cam-thumb-overlay {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  background: rgba(0,0,0,0.65); padding: 3px 5px;
+  font-size: 8px; display: flex; justify-content: space-between;
+}
+
+/* Detection class legend */
+.legend-item {
+  display: flex; align-items: center; gap: 7px; margin-bottom: 4px;
+}
+.legend-dot { width: 8px; height: 8px; flex-shrink: 0; }
+
+/* Stats box */
+.stat-row {
+  display: flex; justify-content: space-between; align-items: baseline;
+  padding: 4px 0; border-bottom: 1px solid var(--border);
+}
+.stat-label { font-size: 9px; color: var(--muted); }
+.stat-val { font-size: 15px; font-weight: 700; }
+
+/* ── Main camera area ── */
+#cam-area {
+  flex: 1; display: grid; overflow: hidden;
+  gap: 3px; padding: 3px;
+  background: #060809;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+
+/* Full view: single camera expanded */
+#cam-area.full-view { grid-template-columns: 1fr; grid-template-rows: 1fr; }
+
+/* ── Camera feed cell ── */
+.cam-cell {
+  position: relative; background: #080a0d;
+  overflow: hidden; cursor: pointer;
+  border: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: center;
+  transition: border-color 0.3s;
+}
+.cam-cell:hover { border-color: var(--muted); }
+.cam-cell.selected { border-color: var(--amber) !important; }
+.cam-cell.running  { border-color: var(--green); }
+.cam-cell.unsafe   { border-color: var(--red); box-shadow: inset 0 0 30px rgba(239,68,68,0.12); }
+.cam-cell.hidden   { display: none; }
+
+/* Video fills cell */
+.cam-cell video {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%; object-fit: cover; display: none;
+}
+.cam-cell video.active { display: block; }
+
+/* Detection canvas sits on top */
+.det-canvas {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%; pointer-events: none;
+}
+
+/* Scanline vignette */
+.cell-scanline {
+  position: absolute; inset: 0; pointer-events: none; z-index: 5;
+  background:
+    repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,0,0,0.06) 3px, rgba(0,0,0,0.06) 4px);
+}
+.cell-vignette {
+  position: absolute; inset: 0; pointer-events: none; z-index: 4;
+  background: radial-gradient(ellipse at center, transparent 60%, rgba(0,0,0,0.55) 100%);
+}
+
+/* Offline placeholder */
+.cell-offline {
+  position: absolute; inset: 0; z-index: 6;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 10px;
+}
+.cell-offline-icon { font-size: 42px; opacity: 0.3; }
+.cell-offline-txt  { font-size: 11px; color: var(--muted); letter-spacing: 2px; }
+.cell-offline-btn  {
+  margin-top: 6px; background: var(--amber); color: #000; border: none;
+  font-family: var(--mono); font-size: 11px; font-weight: 700;
+  padding: 6px 18px; cursor: pointer; letter-spacing: 1px;
+  transition: filter 0.2s;
+}
+.cell-offline-btn:hover { filter: brightness(1.15); }
+
+/* CCTV corner overlays */
+.cam-label-overlay {
+  position: absolute; top: 0; left: 0; z-index: 8;
+  background: rgba(0,0,0,0.7);
+  font-size: 10px; padding: 3px 8px;
+  display: flex; align-items: center; gap: 8px;
+}
+.cam-label-overlay .cam-id { color: var(--amber); font-weight: 700; }
+.cam-label-overlay .cam-loc { color: var(--muted); }
+
+.cam-timestamp {
+  position: absolute; bottom: 0; left: 0; z-index: 8;
+  background: rgba(0,0,0,0.7); font-size: 9px; padding: 2px 7px;
+  color: #9ab; letter-spacing: 1px;
+}
+.cam-rec {
+  position: absolute; top: 4px; right: 6px; z-index: 8;
+  display: flex; align-items: center; gap: 4px; font-size: 9px;
+}
+.rec-live { color: var(--red); font-weight: 700; display: flex; align-items: center; gap: 4px; }
+
+/* Safety banner (bottom of cell) */
+.safety-banner {
+  position: absolute; bottom: 0; right: 0; left: 0; z-index: 9;
+  display: none; align-items: center; justify-content: center;
+  padding: 4px 10px; font-size: 11px; font-weight: 700; gap: 8px;
+}
+.safety-banner.safe   { display: flex; background: rgba(22,163,74,0.85); color: #fff; }
+.safety-banner.unsafe { display: flex; background: rgba(220,38,38,0.9); color: #fff; animation: blink-bg 1s steps(1) infinite; }
+.safety-banner.partial{ display: flex; background: rgba(234,179,8,0.85); color: #000; }
+.safety-banner.clear  { display: flex; background: rgba(15,19,24,0.88); color: #3a4455; }
+
+/* Analyzing indicator */
+.analyzing-indicator {
+  position: absolute; top: 28px; right: 6px; z-index: 8;
+  display: none; align-items: center; gap: 4px;
+  font-size: 9px; color: var(--amber);
+}
+.analyzing-indicator.show { display: flex; }
+.spin { animation: spin 1s linear infinite; display: inline-block; }
+
+/* ── Right panel ── */
+#right-panel {
+  width: 240px; background: var(--surface);
+  border-left: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: 0;
+  overflow-y: auto; flex-shrink: 0;
+}
+.rp-section {
+  border-bottom: 1px solid var(--border); padding: 12px;
+}
+.rp-title {
+  font-size: 9px; color: var(--muted); letter-spacing: 3px;
+  text-transform: uppercase; margin-bottom: 8px;
+}
+
+/* Alert log */
+#alert-log { flex: 1; overflow-y: auto; }
+.alert-entry {
+  padding: 7px 10px; border-bottom: 1px solid var(--border);
+  font-size: 10px; display: flex; flex-direction: column; gap: 2px;
+  animation: slideIn 0.3s ease;
+}
+.alert-entry.unsafe { background: rgba(239,68,68,0.05); border-left: 2px solid var(--red); }
+.alert-entry.safe   { background: rgba(34,197,94,0.03); border-left: 2px solid var(--green); }
+.alert-time { font-size: 9px; color: var(--muted); }
+.alert-cam  { color: var(--amber); font-weight: 700; }
+.alert-msg  { color: var(--text); line-height: 1.4; }
+
+/* Detection tag pills */
+.det-pill {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 9px; padding: 2px 6px; margin: 2px;
+  border: 1px solid;
+}
+
+/* ── Big alert modal ── */
+#alert-modal {
+  display: none; position: fixed; inset: 0;
+  background: rgba(0,0,0,0.88); z-index: 200;
+  align-items: center; justify-content: center;
+}
+#alert-modal.show { display: flex; }
+.alert-box {
+  background: var(--surface); border: 2px solid var(--red);
+  padding: 30px; max-width: 380px; width: 92%;
+  animation: slideDown 0.25s ease;
+  box-shadow: 0 0 60px rgba(239,68,68,0.35);
+  text-align: center;
+}
+.alert-header-bar {
+  background: var(--red); color: #fff; font-weight: 700; font-size: 11px;
+  padding: 5px 12px; margin: -30px -30px 24px; letter-spacing: 3px;
+}
+.alert-icon-ring {
+  width: 64px; height: 64px; border-radius: 50%;
+  border: 2px solid var(--red); background: rgba(239,68,68,0.1);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 30px; margin: 0 auto 16px;
+  animation: pulse-red 1.5s infinite;
+}
+.alert-title { color: var(--red); font-size: 15px; font-weight: 700; margin-bottom: 8px; letter-spacing: 2px; }
+.alert-body  { color: #8a9bb0; font-size: 11px; line-height: 1.7; margin-bottom: 24px; }
+.alert-ack {
+  width: 100%; background: var(--red); border: none; color: #fff;
+  padding: 10px; font-size: 12px; font-weight: 700; cursor: pointer;
+  font-family: var(--mono); letter-spacing: 3px; transition: filter 0.2s;
+}
+.alert-ack:hover { filter: brightness(1.15); }
+
+/* ── Animations ── */
+@keyframes blink       { 50% { opacity: 0; } }
+@keyframes blink-bg    { 50% { opacity: 0.7; } }
+@keyframes spin        { to { transform: rotate(360deg); } }
+@keyframes pulse-red   { 0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,0.5)} 50%{box-shadow:0 0 0 10px rgba(239,68,68,0)} }
+@keyframes slideDown   { from{opacity:0;transform:translateY(-16px)} to{opacity:1;transform:translateY(0)} }
+@keyndef slideIn       { from{opacity:0;transform:translateX(10px)} to{opacity:1;transform:translateX(0)} }
+@keyframes slideIn     { from{opacity:0;transform:translateX(10px)} to{opacity:1;transform:translateX(0)} }
+
+/* ── Class color map ── */
+.cls-helmet         { color:#22c55e; border-color:#22c55e55; background:rgba(34,197,94,0.08); }
+.cls-no_helmet      { color:#ef4444; border-color:#ef444455; background:rgba(239,68,68,0.08); }
+.cls-vest           { color:#38bdf8; border-color:#38bdf855; background:rgba(56,189,248,0.08); }
+.cls-no_vest        { color:#f97316; border-color:#f9731655; background:rgba(249,115,22,0.08); }
+.cls-worker         { color:#a78bfa; border-color:#a78bfa55; background:rgba(167,139,250,0.08); }
+.cls-partially_safe { color:#fbbf24; border-color:#fbbf2455; background:rgba(251,191,36,0.08); }
+.cls-full_safety    { color:#10b981; border-color:#10b98155; background:rgba(16,185,129,0.08); }
+.cls-no_safety      { color:#dc2626; border-color:#dc262655; background:rgba(220,38,38,0.08); }
+
+@media (max-width: 768px) {
+  #left-panel, #right-panel { display: none; }
+  #cam-area { grid-template-columns: 1fr; grid-template-rows: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<!-- ══ TOP BAR ══════════════════════════════════════════════════════ -->
+<div id="topbar">
+  <div class="brand">
+    <div class="brand-badge">◈ CIRCET</div>
+    <div>
+      <div class="brand-title">SAFETY DETECTION SYSTEM</div>
+      <div class="brand-sub">AI-POWERED CCTV MONITORING — YOLOV5 + DEEP LEARNING</div>
+    </div>
+  </div>
+  <div id="clock">00:00:00</div>
+  <div class="sys-status">
+    <div class="sys-pill live"><div class="rec-dot"></div> LIVE</div>
+    <div class="sys-pill" id="detection-mode-pill">AUTO DETECT: OFF</div>
+    <div class="sys-pill" id="cam-count-pill">0 CAMS ACTIVE</div>
+  </div>
+</div>
+
+<!-- ══ MAIN LAYOUT ══════════════════════════════════════════════════ -->
+<div id="layout">
+
+  <!-- ── LEFT PANEL ── -->
+  <div id="left-panel">
+    <div class="panel-section-title">Camera Feeds</div>
+
+    <!-- Cam 1 tile -->
+    <div class="cam-tile" id="tile-1" onclick="selectCam(1)">
+      <div class="cam-tile-header">
+        <span class="cam-name">CAM 1 — SITE ENTRANCE</span>
+        <span class="cam-status" id="tile-status-1" style="color:var(--muted)">OFFLINE</span>
+      </div>
+      <div class="cam-thumb">
+        <canvas id="thumb-canvas-1"></canvas>
+        <div id="tile-offline-1" style="font-size:10px;color:var(--muted);text-align:center">
+          Click to<br>activate
+        </div>
+        <div class="cam-thumb-overlay">
+          <span id="tile-workers-1">— workers</span>
+          <span id="tile-unsafe-1" style="color:var(--red)"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Cam 2 tile -->
+    <div class="cam-tile" id="tile-2" onclick="selectCam(2)">
+      <div class="cam-tile-header">
+        <span class="cam-name">CAM 2 — WORK ZONE</span>
+        <span class="cam-status" id="tile-status-2" style="color:var(--muted)">OFFLINE</span>
+      </div>
+      <div class="cam-thumb">
+        <canvas id="thumb-canvas-2"></canvas>
+        <div id="tile-offline-2" style="font-size:10px;color:var(--muted);text-align:center">
+          Click to<br>activate
+        </div>
+        <div class="cam-thumb-overlay">
+          <span id="tile-workers-2">— workers</span>
+          <span id="tile-unsafe-2" style="color:var(--red)"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel-section-title" style="margin-top:4px">Live Statistics</div>
+    <div>
+      <div class="stat-row">
+        <span class="stat-label">TOTAL WORKERS</span>
+        <span class="stat-val" id="stat-workers" style="color:var(--amber)">0</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">COMPLIANT</span>
+        <span class="stat-val" id="stat-safe" style="color:var(--green)">0</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">NON-COMPLIANT</span>
+        <span class="stat-val" id="stat-unsafe" style="color:var(--red)">0</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">TOTAL ALERTS</span>
+        <span class="stat-val" id="stat-alerts" style="color:var(--red)">0</span>
+      </div>
+    </div>
+
+    <div class="panel-section-title" style="margin-top:4px">Detection Classes</div>
+    <div>
+      <div class="legend-item"><div class="legend-dot" style="background:#22c55e"></div><span style="font-size:9px;color:#666">Helmet</span></div>
+      <div class="legend-item"><div class="legend-dot" style="background:#ef4444"></div><span style="font-size:9px;color:#666">No-Helmet</span></div>
+      <div class="legend-item"><div class="legend-dot" style="background:#38bdf8"></div><span style="font-size:9px;color:#666">Vest</span></div>
+      <div class="legend-item"><div class="legend-dot" style="background:#f97316"></div><span style="font-size:9px;color:#666">No-Vest</span></div>
+      <div class="legend-item"><div class="legend-dot" style="background:#a78bfa"></div><span style="font-size:9px;color:#666">Worker</span></div>
+      <div class="legend-item"><div class="legend-dot" style="background:#fbbf24"></div><span style="font-size:9px;color:#666">Partially Safe</span></div>
+      <div class="legend-item"><div class="legend-dot" style="background:#10b981"></div><span style="font-size:9px;color:#666">Full Safety</span></div>
+      <div class="legend-item"><div class="legend-dot" style="background:#dc2626"></div><span style="font-size:9px;color:#666">No Safety</span></div>
+    </div>
+
+    <div style="margin-top:auto;font-size:8px;color:#2a3444;line-height:1.9">
+      MODEL: YOLOV5s<br>
+      EPOCHS: 50 | BATCH: 16<br>
+      IMG SIZE: 320×320<br>
+      mAP@0.5: 0.555<br>
+      PRECISION: 1.00 @ 0.931<br>
+      RECALL: 0.73 @ 0.000
+    </div>
+  </div>
+
+  <!-- ══ CAMERA GRID ══════════════════════════════════════════════ -->
+  <div id="cam-area">
+
+    <!-- ── CAMERA CELL 1 ── -->
+    <div class="cam-cell" id="cell-1">
+      <video id="vid-1" autoplay muted playsinline></video>
+      <canvas class="det-canvas" id="dcanvas-1"></canvas>
+      <div class="cell-scanline"></div>
+      <div class="cell-vignette"></div>
+
+      <!-- CCTV overlays -->
+      <div class="cam-label-overlay">
+        <span class="cam-name">CAM 01</span>
+        <span class="cam-loc" style="color:var(--muted)">SITE ENTRANCE</span>
+      </div>
+      <div class="cam-rec">
+        <span class="rec-live"><div class="rec-dot"></div> REC</span>
+      </div>
+      <div class="cam-timestamp" id="ts-1"></div>
+      <div class="analyzing-indicator" id="analyzing-1">
+        <span class="spin">⚙</span> ANALYZING...
+      </div>
+
+      <!-- Offline state -->
+      <div class="cell-offline" id="offline-1">
+        <div class="cell-offline-icon">📷</div>
+        <div class="cell-offline-txt">CAM 01 — OFFLINE</div>
+        <button class="cell-offline-btn" onclick="activateCam(1, event)">
+          ▶ ACTIVATE CAMERA
+        </button>
+        <div style="font-size:9px;color:var(--muted);margin-top:6px;text-align:center">
+          Laptop webcam or<br>phone browser camera
+        </div>
+      </div>
+
+      <!-- Safety status banner -->
+      <div class="safety-banner" id="banner-1"></div>
+    </div>
+
+    <!-- ── CAMERA CELL 2 ── -->
+    <div class="cam-cell" id="cell-2">
+      <video id="vid-2" autoplay muted playsinline></video>
+      <canvas class="det-canvas" id="dcanvas-2"></canvas>
+      <div class="cell-scanline"></div>
+      <div class="cell-vignette"></div>
+
+      <div class="cam-label-overlay">
+        <span class="cam-name">CAM 02</span>
+        <span class="cam-loc" style="color:var(--muted)">WORK ZONE</span>
+      </div>
+      <div class="cam-rec">
+        <span class="rec-live"><div class="rec-dot"></div> REC</span>
+      </div>
+      <div class="cam-timestamp" id="ts-2"></div>
+      <div class="analyzing-indicator" id="analyzing-2">
+        <span class="spin">⚙</span> ANALYZING...
+      </div>
+
+      <div class="cell-offline" id="offline-2">
+        <div class="cell-offline-icon">📷</div>
+        <div class="cell-offline-txt">CAM 02 — OFFLINE</div>
+        <button class="cell-offline-btn" onclick="activateCam(2, event)">
+          ▶ ACTIVATE CAMERA
+        </button>
+        <div style="font-size:9px;color:var(--muted);margin-top:6px;text-align:center">
+          Laptop webcam or<br>phone browser camera
+        </div>
+      </div>
+
+      <div class="safety-banner" id="banner-2"></div>
+    </div>
+
+    <!-- ── CAMERA CELL 3 (placeholder / phone tip) ── -->
+    <div class="cam-cell" id="cell-3">
+      <div class="cell-scanline"></div>
+      <div class="cell-vignette"></div>
+      <div class="cam-label-overlay">
+        <span class="cam-name">CAM 03</span>
+        <span class="cam-loc" style="color:var(--muted)">REMOTE — PHONE</span>
+      </div>
+      <div class="cell-offline" id="offline-3">
+        <div class="cell-offline-icon" style="font-size:32px">📱</div>
+        <div class="cell-offline-txt">PHONE CAMERA</div>
+        <div style="font-size:9px;color:var(--muted);margin-top:8px;text-align:center;line-height:1.9;max-width:220px">
+          Open on your phone (HTTPS required):<br>
+          <span id="phone-url" style="color:var(--amber);font-size:10px;line-height:2">Loading…</span><br>
+          <span id="phone-https-note" style="color:#ef4444;font-size:8px"></span><br>
+          Using phone hotspot? Use laptop's<br>
+          IP shown in server console.<br>
+          Accept the browser security warning<br>
+          then activate a camera slot.
+        </div>
+      </div>
+    </div>
+
+    <!-- ── CAMERA CELL 4 (system info) ── -->
+    <div class="cam-cell" id="cell-4" style="cursor:default">
+      <div class="cell-scanline"></div>
+      <div class="cell-vignette"></div>
+      <div class="cam-label-overlay">
+        <span class="cam-name">SYS</span>
+        <span class="cam-loc" style="color:var(--muted)">CONTROL</span>
+      </div>
+      <div style="position:absolute;inset:0;z-index:10;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:16px">
+        <div style="font-size:9px;color:var(--muted);letter-spacing:2px">AUTO DETECTION INTERVAL</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center">
+          <button onclick="setInterval_sec(5)"  class="cell-offline-btn" id="btn-5s">5s</button>
+          <button onclick="setInterval_sec(10)" class="cell-offline-btn" id="btn-10s" style="background:#1e2530;color:var(--text)">10s</button>
+          <button onclick="setInterval_sec(20)" class="cell-offline-btn" id="btn-20s" style="background:#1e2530;color:var(--text)">20s</button>
+        </div>
+        <div style="font-size:9px;color:var(--muted);letter-spacing:2px;margin-top:6px">DETECTION MODE</div>
+        <button id="auto-master-btn" onclick="toggleAutoAll()" class="cell-offline-btn">
+          ⚡ START AUTO DETECTION
+        </button>
+        <button id="analyze-now-btn" onclick="analyzeAllNow()" class="cell-offline-btn" style="background:#1e2530;color:var(--amber);border:1px solid var(--amber)">
+          📸 ANALYZE NOW
+        </button>
+        <div id="ctrl-status" style="font-size:9px;color:#ef4444;letter-spacing:1px;min-height:14px;text-align:center"></div>
+        <div style="font-size:8px;color:#2a3444;text-align:center;line-height:1.7">
+          Activate CAM 01 or CAM 02 first,<br>
+          then click ANALYZE NOW
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── RIGHT PANEL ── -->
+  <div id="right-panel">
+    <div class="rp-section">
+      <div class="rp-title">Live Detection Log</div>
+      <div id="current-det-tags" style="min-height:40px"></div>
+    </div>
+    <div class="rp-section" style="flex:0">
+      <div class="rp-title">Alert History</div>
+    </div>
+    <div id="alert-log">
+      <div style="padding:16px;font-size:10px;color:var(--muted);text-align:center">
+        No alerts yet.<br>Start cameras to begin monitoring.
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ ALERT MODAL ══════════════════════════════════════════════════ -->
+<div id="alert-modal">
+  <div class="alert-box">
+    <div class="alert-header-bar">⚠ SAFETY ALERT — <span id="amodal-cam"></span></div>
+    <div class="alert-icon-ring">⚠</div>
+    <div class="alert-title">UNSAFE WORKER DETECTED</div>
+    <div class="alert-body" id="amodal-msg"></div>
+    <button class="alert-ack" onclick="closeAlert()">ACKNOWLEDGE — OK</button>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════
+     JAVASCRIPT
+══════════════════════════════════════════════════════════════════════ -->
+<script>
+// ── Constants ────────────────────────────────────────────────────────
+const CLS = {
+  helmet:         { label:'Helmet',         color:'#22c55e' },
+  no_helmet:      { label:'No-Helmet',      color:'#ef4444' },
+  vest:           { label:'Vest',           color:'#38bdf8' },
+  no_vest:        { label:'No-Vest',        color:'#f97316' },
+  worker:         { label:'Worker',         color:'#a78bfa' },
+  partially_safe: { label:'Partially Safe', color:'#fbbf24' },
+  full_safety:    { label:'Full Safety',    color:'#10b981' },
+  no_safety:      { label:'No Safety',      color:'#dc2626' },
+};
+
+// ── State ────────────────────────────────────────────────────────────
+let cams = {
+  1: { stream: null, active: false, status: null, summary: null, dets: [], analyzing: false },
+  2: { stream: null, active: false, status: null, summary: null, dets: [], analyzing: false },
+};
+let autoMode = false;
+let autoTimer = null;
+let intervalSec = 5;
+let totalAlerts = 0;
+let selectedCam = null;
+
+// ── Clock & timestamps ───────────────────────────────────────────────
+function pad(n){ return String(n).padStart(2,'0'); }
+function fmtTime(d){ return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; }
+function fmtFull(d){ return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${fmtTime(d)}`; }
+
+setInterval(() => {
+  const now = new Date();
+  document.getElementById('clock').textContent = fmtTime(now);
+  [1,2].forEach(id => {
+    const el = document.getElementById(`ts-${id}`);
+    if(el) el.textContent = fmtFull(now);
+  });
+}, 1000);
+
+// ── Get phone URL (works for both local and Vercel deployment) ───────
+fetch('/api/health').then(r=>r.json()).then(d=>{
+  const el = document.getElementById('phone-url');
+  const noteEl = document.getElementById('phone-https-note');
+
+  if (d.isVercel && d.vercelUrl) {
+    // Deployed on Vercel — HTTPS is automatic, just share the same URL
+    el.innerHTML = `<a href="${d.vercelUrl}" target="_blank"
+        style="color:var(--amber);text-decoration:none;display:block">
+        ${d.vercelUrl}
+      </a>`;
+    if (noteEl) noteEl.textContent = '';
+  } else if (d.ips && d.ips.length > 0) {
+    // Local dev — show HTTPS URLs for all network interfaces
+    const httpsPort = d.httpsPort || 3443;
+    el.innerHTML = d.ips.map(ip =>
+      `<a href="https://${ip.address}:${httpsPort}" target="_blank"
+          style="color:var(--amber);text-decoration:none;display:block">
+         https://${ip.address}:${httpsPort}
+       </a>`
+    ).join('');
+    if (noteEl && !d.httpsReady) {
+      noteEl.textContent = '⚠ Run: node generate-cert.js for HTTPS';
+    }
+  } else {
+    el.textContent = window.location.origin;
+  }
+}).catch(()=>{
+  document.getElementById('phone-url').textContent = window.location.origin;
+});
+
+// ── Camera activation ────────────────────────────────────────────────
+async function activateCam(id, evt) {
+  if(evt) evt.stopPropagation();
+
+  // Try rear camera first (phone), fallback to any
+  const constraints = [
+    { video: { facingMode: { ideal: 'environment' }, width:{ideal:1280}, height:{ideal:720} }, audio: false },
+    { video: { facingMode: 'user', width:{ideal:1280}, height:{ideal:720} }, audio: false },
+    { video: true, audio: false },
+  ];
+
+  let stream = null;
+  for(const c of constraints){
+    try { stream = await navigator.mediaDevices.getUserMedia(c); break; }
+    catch(e){ console.warn('Camera constraint failed, trying next...', e.message); }
+  }
+
+  if(!stream){
+    alert('❌ Cannot access camera.\n\nIf you are on a phone, make sure you opened:\nhttps://YOUR_LAPTOP_IP:3443\n(HTTPS required for phone camera)');
+    return;
+  }
+
+  cams[id].stream = stream;
+  cams[id].active = true;
+
+  const vid = document.getElementById(`vid-${id}`);
+  vid.srcObject = stream;
+  vid.classList.add('active');
+
+  document.getElementById(`offline-${id}`).style.display = 'none';
+  document.getElementById(`cell-${id}`).classList.add('running');
+  document.getElementById(`tile-${id}`).classList.add('running');
+  document.getElementById(`tile-status-${id}`).textContent = 'LIVE';
+  document.getElementById(`tile-status-${id}`).style.color = '#22c55e';
+  document.getElementById(`tile-offline-${id}`).style.display = 'none';
+
+  updateCamCount();
+
+  // Trigger first analysis after video starts
+  vid.addEventListener('loadeddata', () => { setTimeout(() => analyzeOne(id), 1500); }, { once: true });
+}
+
+function selectCam(id){
+  selectedCam = id;
+  document.querySelectorAll('.cam-tile').forEach(t => t.classList.remove('active'));
+  document.getElementById(`tile-${id}`).classList.add('active');
+}
+
+function updateCamCount(){
+  const active = [1,2].filter(id => cams[id].active).length;
+  document.getElementById('cam-count-pill').textContent = `${active} CAM${active!==1?'S':''} ACTIVE`;
+}
+
+// ── Frame capture ────────────────────────────────────────────────────
+function captureFrame(id){
+  const vid = document.getElementById(`vid-${id}`);
+  if(!vid || !vid.srcObject || vid.readyState < 2) return null;
+  const tmp = document.createElement('canvas');
+  tmp.width  = vid.videoWidth  || 640;
+  tmp.height = vid.videoHeight || 480;
+  tmp.getContext('2d').drawImage(vid, 0, 0);
+  return { dataUrl: tmp.toDataURL('image/jpeg', 0.8), w: tmp.width, h: tmp.height };
+}
+
+// ── Single camera analysis ───────────────────────────────────────────
+async function analyzeOne(id){
+  if(!cams[id].active || cams[id].analyzing) return;
+  const frame = captureFrame(id);
+  if(!frame) return;
+
+  cams[id].analyzing = true;
+  document.getElementById(`analyzing-${id}`).classList.add('show');
+
+  try {
+    const resp = await fetch('/api/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        imageBase64: frame.dataUrl.split(',')[1],
+        mediaType:   'image/jpeg',
+        imgWidth:    frame.w,
+        imgHeight:   frame.h,
+      })
+    });
+    const data = await resp.json();
+    if (data.error) {
+      console.error('API error from server:', data.error);
+      const log = document.getElementById('alert-log');
+      const entry = document.createElement('div');
+      entry.className = 'alert-entry unsafe';
+      entry.innerHTML = `<span class="alert-time">${fmtFull(new Date())}</span><span class="alert-cam">CAM 0${id} — API ERROR</span><span class="alert-msg" style="color:#f97316">${data.error}</span>`;
+      log.insertBefore(entry, log.firstChild);
+      return;
+    }
+    applyResult(id, data, frame);
+  } catch(e){
+    console.error('Analysis error:', e);
+  }
+
+  cams[id].analyzing = false;
+  document.getElementById(`analyzing-${id}`).classList.remove('show');
+}
+
+// ── Apply detection result ───────────────────────────────────────────
+function applyResult(id, data, frame){
+  const dets    = data.detections || [];
+  const summary = data.summary    || {};
+  const status  = summary.safety_status || 'SAFE';
+
+  cams[id].dets    = dets;
+  cams[id].status  = status;
+  cams[id].summary = summary;
+
+  drawDetections(id, dets, frame.w, frame.h);
+  updateThumbnail(id, frame.dataUrl, dets, frame.w, frame.h);
+  updateBanner(id, status, summary);
+  updateCellClass(id, status);
+  updateSidebar(id, status, summary);
+  updateStats();
+  logAlert(id, status, data.analysis, dets);
+  if(status === 'UNSAFE') showAlertModal(id, data.analysis);
+  updateCurrentDetTags(dets);
+}
+
+// ── Draw bounding boxes on the overlay canvas ────────────────────────
+function drawDetections(id, dets, imgW, imgH){
+  const cell   = document.getElementById(`cell-${id}`);
+  const canvas = document.getElementById(`dcanvas-${id}`);
+  const cw = cell.offsetWidth;
+  const ch = cell.offsetHeight;
+  canvas.width  = cw;
+  canvas.height = ch;
+
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, cw, ch);
+
+  // Scale from video space to cell space (object-fit: cover)
+  const vidAspect  = imgW / imgH;
+  const cellAspect = cw  / ch;
+  let scaleX, scaleY, offX = 0, offY = 0;
+  if(vidAspect > cellAspect){
+    scaleY = ch / imgH;
+    scaleX = scaleY;
+    offX   = (cw - imgW * scaleX) / 2;
+  } else {
+    scaleX = cw / imgW;
+    scaleY = scaleX;
+    offY   = (ch - imgH * scaleY) / 2;
+  }
+
+  dets.forEach(det => {
+    const cls = CLS[det.class] || { label: det.class, color:'#fff' };
+    const x = offX + det.x * scaleX;
+    const y = offY + det.y * scaleY;
+    const w = det.w * scaleX;
+    const h = det.h * scaleY;
+
+    // Glow
+    ctx.shadowColor = cls.color;
+    ctx.shadowBlur  = 8;
+
+    ctx.strokeStyle = cls.color;
+    ctx.lineWidth   = 2;
+    ctx.strokeRect(x, y, w, h);
+
+    ctx.shadowBlur  = 0;
+    ctx.fillStyle   = cls.color + '1a';
+    ctx.fillRect(x, y, w, h);
+
+    // Corner ticks
+    const t = 10;
+    ctx.strokeStyle = cls.color; ctx.lineWidth = 3;
+    [[x,y,1,0],[x+w,y,-1,0],[x,y+h,1,0],[x+w,y+h,-1,0]].forEach(([bx,by,dx,dy]) => {
+      ctx.beginPath(); ctx.moveTo(bx,by); ctx.lineTo(bx+dx*t,by); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(bx,by); ctx.lineTo(bx,by+(dy||dx)*t); ctx.stroke();
+    });
+
+    // Label
+    const label = `${cls.label}  ${Math.round(det.confidence*100)}%`;
+    ctx.font = 'bold 11px "Share Tech Mono", monospace';
+    const tw = ctx.measureText(label).width + 10;
+    ctx.fillStyle = cls.color;
+    ctx.fillRect(x, y - 18, tw, 18);
+    ctx.fillStyle = '#000';
+    ctx.fillText(label, x + 5, y - 5);
+  });
+}
+
+// ── Thumbnail update ─────────────────────────────────────────────────
+function updateThumbnail(id, dataUrl, dets, imgW, imgH){
+  const canvas = document.getElementById(`thumb-canvas-${id}`);
+  const thumb  = canvas.parentElement;
+  canvas.width  = thumb.offsetWidth  || 196;
+  canvas.height = thumb.offsetHeight || 72;
+  const ctx = canvas.getContext('2d');
+  const img = new Image();
+  img.onload = () => {
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    const sx = canvas.width / imgW;
+    const sy = canvas.height/ imgH;
+    dets.forEach(d => {
+      const cls = CLS[d.class] || { color:'#fff' };
+      ctx.strokeStyle = cls.color;
+      ctx.lineWidth   = 1.5;
+      ctx.strokeRect(d.x*sx, d.y*sy, d.w*sx, d.h*sy);
+    });
+  };
+  img.src = dataUrl;
+}
+
+// ── Cell / banner / sidebar updates ─────────────────────────────────
+function updateBanner(id, status, summary){
+  const banner = document.getElementById(`banner-${id}`);
+  banner.className = 'safety-banner';
+  const workers = summary?.total_workers ?? 0;
+  if(workers === 0){
+    banner.classList.add('clear');
+    banner.innerHTML = '— NO WORKERS IN FRAME';
+  } else if(status === 'UNSAFE'){
+    banner.classList.add('unsafe');
+    banner.innerHTML = '<span class="rec-dot"></span> ⚠ UNSAFE WORKER DETECTED';
+  } else if(status === 'SAFE'){
+    banner.classList.add('safe');
+    banner.innerHTML = '✓ ALL WORKERS COMPLIANT';
+  } else if(status === 'PARTIAL'){
+    banner.classList.add('partial');
+    banner.innerHTML = '⚡ PARTIAL COMPLIANCE';
+  }
+}
+
+function updateCellClass(id, status){
+  const cell = document.getElementById(`cell-${id}`);
+  cell.classList.remove('unsafe');
+  if(status === 'UNSAFE') cell.classList.add('unsafe');
+  const tile = document.getElementById(`tile-${id}`);
+  tile.classList.remove('unsafe');
+  if(status === 'UNSAFE') tile.classList.add('unsafe');
+}
+
+function updateSidebar(id, status, summary){
+  const colors = { SAFE:'#22c55e', UNSAFE:'#ef4444', PARTIAL:'#fbbf24' };
+  const color  = colors[status] || '#556';
+  const stEl   = document.getElementById(`tile-status-${id}`);
+  stEl.textContent = status || 'ACTIVE';
+  stEl.style.color = color;
+  if(summary){
+    document.getElementById(`tile-workers-${id}`).textContent = `${summary.total_workers} worker${summary.total_workers!==1?'s':''}`;
+    document.getElementById(`tile-unsafe-${id}`).textContent  = summary.unsafe_count ? `${summary.unsafe_count} UNSAFE` : '';
+  }
+}
+
+function updateStats(){
+  const w1 = cams[1].summary?.total_workers || 0;
+  const w2 = cams[2].summary?.total_workers || 0;
+  const u1 = cams[1].summary?.unsafe_count  || 0;
+  const u2 = cams[2].summary?.unsafe_count  || 0;
+  const tot = w1+w2, unsafe = u1+u2;
+  document.getElementById('stat-workers').textContent = tot;
+  document.getElementById('stat-safe').textContent    = tot - unsafe;
+  document.getElementById('stat-unsafe').textContent  = unsafe;
+  document.getElementById('stat-alerts').textContent  = totalAlerts;
+}
+
+function updateCurrentDetTags(dets){
+  const el = document.getElementById('current-det-tags');
+  if(!dets.length){ el.innerHTML = '<span style="font-size:10px;color:var(--muted)">No detections</span>'; return; }
+  el.innerHTML = dets.map(d => {
+    const cls = CLS[d.class] || { label: d.class, color:'#fff' };
+    const key = d.class.replace(/-/g,'_');
+    return `<span class="det-pill cls-${key}">${cls.label} <span style="opacity:.6">${Math.round(d.confidence*100)}%</span></span>`;
+  }).join('');
+}
+
+// ── Alert log ────────────────────────────────────────────────────────
+function logAlert(id, status, analysis, dets){
+  if(!analysis) return;
+  totalAlerts++;
+  const log    = document.getElementById('alert-log');
+  const isNew  = log.querySelector('div[style]');
+  if(isNew) log.innerHTML = '';
+
+  const entry  = document.createElement('div');
+  entry.className = `alert-entry ${status === 'UNSAFE' ? 'unsafe' : 'safe'}`;
+  entry.innerHTML = `
+    <span class="alert-time">${fmtFull(new Date())}</span>
+    <span class="alert-cam">CAM 0${id} — ${status}</span>
+    <span class="alert-msg">${analysis}</span>
+    <div>${dets.slice(0,4).map(d=>{
+      const cls = CLS[d.class]||{label:d.class,color:'#fff'};
+      const key = d.class.replace(/-/g,'_');
+      return `<span class="det-pill cls-${key}">${cls.label}</span>`;
+    }).join('')}</div>`;
+  log.insertBefore(entry, log.firstChild);
+  updateStats();
+}
+
+// ── Modal ────────────────────────────────────────────────────────────
+function showAlertModal(id, msg){
+  document.getElementById('amodal-cam').textContent = `CAM 0${id}`;
+  document.getElementById('amodal-msg').textContent  = msg || 'Unsafe worker detected — missing PPE!';
+  document.getElementById('alert-modal').classList.add('show');
+}
+function closeAlert(){
+  document.getElementById('alert-modal').classList.remove('show');
+}
+
+// ── Auto detection ───────────────────────────────────────────────────
+function analyzeAllNow(){
+  const active = [1,2].filter(id => cams[id].active);
+  const statusEl = document.getElementById('ctrl-status');
+  if(active.length === 0){
+    statusEl.textContent = '⚠ Activate a camera first';
+    setTimeout(() => { statusEl.textContent = ''; }, 3000);
+    return;
+  }
+  statusEl.textContent = '';
+  active.forEach(id => analyzeOne(id));
+}
+
+function toggleAutoAll(){
+  const statusEl = document.getElementById('ctrl-status');
+  if(autoMode){
+    clearInterval(autoTimer);
+    autoMode = false;
+    autoTimer = null;
+    document.getElementById('auto-master-btn').textContent = '⚡ START AUTO DETECTION';
+    document.getElementById('detection-mode-pill').textContent = 'AUTO DETECT: OFF';
+  } else {
+    const active = [1,2].filter(id => cams[id].active);
+    if(active.length === 0){
+      statusEl.textContent = '⚠ Activate a camera first';
+      setTimeout(() => { statusEl.textContent = ''; }, 3000);
+      return;
+    }
+    autoMode = true;
+    statusEl.textContent = '';
+    document.getElementById('auto-master-btn').textContent = '⏹ STOP AUTO DETECTION';
+    document.getElementById('detection-mode-pill').textContent = `AUTO DETECT: ${intervalSec}s`;
+    analyzeAllNow();
+    autoTimer = setInterval(analyzeAllNow, intervalSec * 1000);
+  }
+}
+
+function setInterval_sec(sec){
+  intervalSec = sec;
+  ['5','10','20'].forEach(s => {
+    const btn = document.getElementById(`btn-${s}s`);
+    btn.style.background = (s == sec) ? 'var(--amber)' : '#1e2530';
+    btn.style.color      = (s == sec) ? '#000' : 'var(--text)';
+  });
+  if(autoMode){
+    clearInterval(autoTimer);
+    autoTimer = setInterval(analyzeAllNow, intervalSec * 1000);
+    document.getElementById('detection-mode-pill').textContent = `AUTO DETECT: ${intervalSec}s`;
+  }
+}
+
+// ── Canvas resize on window resize ───────────────────────────────────
+window.addEventListener('resize', () => {
+  [1,2].forEach(id => {
+    if(cams[id].active && cams[id].dets.length){
+      const vid = document.getElementById(`vid-${id}`);
+      drawDetections(id, cams[id].dets, vid.videoWidth||640, vid.videoHeight||480);
+    }
+  });
+});
+
+// ── ESC to close modal ───────────────────────────────────────────────
+document.addEventListener('keydown', e => { if(e.key==='Escape') closeAlert(); });
+</script>
+</body>
+</html>

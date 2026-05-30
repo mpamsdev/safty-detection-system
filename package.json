@@ -1,0 +1,20 @@
+{
+  "name": "ai-safety-detection-system",
+  "version": "1.0.0",
+  "description": "AI Safety Detection System for Public Works Sites - YOLOv5 + Claude Vision",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "cert": "node generate-cert.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.18.2"
+  },
+  "devDependencies": {
+    "dotenv": "^16.6.1",
+    "nodemon": "^3.0.1",
+    "selfsigned": "^2.4.1"
+  }
+}
