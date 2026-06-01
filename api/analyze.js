@@ -27,7 +27,8 @@ module.exports = async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  // Strip BOM and whitespace — PowerShell sometimes adds ﻿ when piping env vars
+  const apiKey = (process.env.ANTHROPIC_API_KEY || "").replace(/[^\x20-\x7E]/g, "").trim();
   if (!apiKey) {
     return res.status(500).json({ error: "ANTHROPIC_API_KEY not configured" });
   }
