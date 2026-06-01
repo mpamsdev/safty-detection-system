@@ -734,11 +734,19 @@ function updateCamCount(){
 function captureFrame(id){
   const vid = document.getElementById(`vid-${id}`);
   if(!vid || !vid.srcObject || vid.readyState < 2) return null;
+
+  // Cap at 800px wide — keeps base64 payload under ~300KB for Vercel
+  const srcW = vid.videoWidth  || 640;
+  const srcH = vid.videoHeight || 480;
+  const scale = Math.min(1, 800 / srcW);
+  const w = Math.round(srcW * scale);
+  const h = Math.round(srcH * scale);
+
   const tmp = document.createElement('canvas');
-  tmp.width  = vid.videoWidth  || 640;
-  tmp.height = vid.videoHeight || 480;
-  tmp.getContext('2d').drawImage(vid, 0, 0);
-  return { dataUrl: tmp.toDataURL('image/jpeg', 0.8), w: tmp.width, h: tmp.height };
+  tmp.width  = w;
+  tmp.height = h;
+  tmp.getContext('2d').drawImage(vid, 0, 0, w, h);
+  return { dataUrl: tmp.toDataURL('image/jpeg', 0.65), w, h };
 }
 
 // ── Single camera analysis ───────────────────────────────────────────

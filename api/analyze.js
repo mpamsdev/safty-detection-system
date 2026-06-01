@@ -29,15 +29,32 @@ module.exports = async function handler(req, res) {
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
-    return res.status(500).json({ error: "ANTHROPIC_API_KEY environment variable not set" });
+    return res.status(500).json({ error: "ANTHROPIC_API_KEY not configured" });
   }
 
   try {
-    const { imageBase64, mediaType, imgWidth, imgHeight } = req.body;
+    // Vercel may auto-parse JSON or leave it as a raw string — handle both
+    let body = req.body;
+    if (typeof body === "string") {
+      try { body = JSON.parse(body); } catch(e) { body = {}; }
+    }
+    if (!body || typeof body !== "object") {
+      body = {};
+    }
+
+    const { imageBase64, mediaType, imgWidth, imgHeight } = body;
 
     if (!imageBase64) {
-      return res.status(400).json({ error: "imageBase64 is required" });
+      return res.status(400).json({
+        error: "No image received — make sure a camera is active before analyzing",
+        debug: { bodyType: typeof req.body, hasBody: !!req.body }
+      });
     }
+
+    // Strip any non-base64 characters (guards against BOM or encoding artifacts)
+    const cleanBase64 = String(imageBase64).replace(/[^A-Za-z0-9+/=]/g, "");
+
+    console.log(`Analyzing image: ${imgWidth}x${imgHeight}, base64 chars: ${cleanBase64.length}`);
 
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -54,11 +71,11 @@ module.exports = async function handler(req, res) {
           content: [
             {
               type: "image",
-              source: { type: "base64", media_type: mediaType || "image/jpeg", data: imageBase64 }
+              source: { type: "base64", media_type: mediaType || "image/jpeg", data: cleanBase64 }
             },
             {
               type: "text",
-              text: PROMPT(imgWidth, imgHeight)
+              text: PROMPT(imgWidth || 640, imgHeight || 480)
             }
           ]
         }]
@@ -73,15 +90,15 @@ module.exports = async function handler(req, res) {
     }
 
     const text = data.content?.find(c => c.type === "text")?.text || "{}";
-    console.log("Claude response:", text.substring(0, 200));
+    console.log("Claude response preview:", text.substring(0, 300));
 
     const clean = text.replace(/```json|```/g, "").trim();
     const parsed = JSON.parse(clean);
-    console.log(`Detected: ${parsed.summary?.total_workers ?? "?"} workers | ${parsed.summary?.safety_status ?? "?"}`);
+    console.log(`Result: ${parsed.summary?.total_workers ?? "?"} workers | ${parsed.summary?.safety_status ?? "?"}`);
 
     res.json(parsed);
   } catch (err) {
-    console.error("Handler error:", err.message);
+    console.error("Handler error:", err.message, "\n", err.stack?.split("\n").slice(0, 4).join("\n"));
     res.status(500).json({ error: err.message });
   }
 };
